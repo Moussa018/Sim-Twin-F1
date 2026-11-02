@@ -65,7 +65,7 @@ docker exec f1-kafka /opt/kafka/bin/kafka-console-consumer.sh \
 
 ## 3D view
 
-![J.A.R.V.I.S. 3D view: the Mexico City circuit with live cars, race control feed, telemetry cluster and predictions](docs/3d-view.png)
+![J.A.R.V.I.S. 3D view: the Mexico City circuit with live cars, race control feed, telemetry cluster and predictions](docs/f1.png)
 
 *The 3D view replaying the Mexico City race: live cars on the real circuit, race control messages, the selected driver's telemetry, the predictor panel and the assistant console.*
 
