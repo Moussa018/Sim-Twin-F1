@@ -110,7 +110,7 @@ def fetcher(api, cfg, session, out):
         for kind, endpoint in (("car", "car_data"), ("loc", "location")):
             try:
                 got = api.get(endpoint, session_key=session["session_key"],
-                              **{"date>": iso(cursor), "date<=": iso(stop)})
+                              **{"date>": iso(cursor), "date<": iso(stop)})
             except Exception as e:  # keep going on a bad window
                 log.warning("%s %s: %s", endpoint, iso(cursor), e)
                 got = []

@@ -105,7 +105,7 @@ def track():
     start = datetime.fromisoformat(lap["date_start"])
     end = start + timedelta(seconds=lap["lap_duration"])
     pts = api.get("location", session_key=s["session_key"], driver_number=lap["driver_number"],
-                  **{"date>": start.isoformat(), "date<=": end.isoformat()})
+                  **{"date>": start.isoformat(), "date<": end.isoformat()})
     pts = [[p["x"], p["y"], p["z"]] for p in pts]
     if len(pts) < 50:
         raise HTTPException(503, "not enough position data to draw the circuit")
