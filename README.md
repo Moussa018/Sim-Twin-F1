@@ -1,6 +1,6 @@
 # Sim-Twin-F1
 
-Streaming F1 telemetry pipeline: real race data (OpenF1 API) is replayed into Apache Kafka, stored in TimescaleDB, and monitored with Prometheus and Grafana.
+I love Formula 1, and I always wanted to see a race the way the engineers do. So I built my own pit wall. Sim-Twin-F1 takes real race data from the OpenF1 API (the Mexico City GP is my test race) and replays it through Apache Kafka as if the race were happening right now. Speed, throttle, brake, gears, positions, laps, flags, safety cars: it all flows through the pipeline in real time.
 
 ```
 OpenF1 API ──► producer ──► Kafka ──► sink ──► TimescaleDB ──► Grafana
