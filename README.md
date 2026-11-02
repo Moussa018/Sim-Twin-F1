@@ -7,6 +7,10 @@ I love Formula 1, and I always wanted to see a race the way the engineers do. So
 
 *The 3D view replaying the Mexico City race: live cars on the real circuit, race control messages, the selected driver's telemetry, the predictor panel and the assistant console.*
 
+![Chase camera view: Max Verstappen's car at 332 km/h with live telemetry, tyre wear and lap time forecast](docs/chase-view.png)
+
+*The chase camera behind the selected car: 332 km/h in 8th gear, throttle and RPM bars, and the predictor forecasting the next lap at 1:21.531 with the tyres at 12% wear.*
+
 
 | Key | Action |
 |---|---|
