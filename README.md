@@ -65,6 +65,10 @@ docker exec f1-kafka /opt/kafka/bin/kafka-console-consumer.sh \
 
 ## 3D view
 
+![J.A.R.V.I.S. 3D view: the Mexico City circuit with live cars, race control feed, telemetry cluster and predictions](docs/3d-view.png)
+
+*The 3D view replaying the Mexico City race: live cars on the real circuit, race control messages, the selected driver's telemetry, the predictor panel and the assistant console.*
+
 Open http://localhost:8080 once the producer is running. Cars move around the real circuit; the HUD shows the selected driver's telemetry and the predictor's output, with an assistant console that can read alerts aloud.
 
 | Key | Action |
@@ -107,6 +111,7 @@ producer/     producer.py, openf1.py, requirements.txt, Dockerfile
 sink/         sink.py, requirements.txt, Dockerfile
 predictor/    predictor.py, requirements.txt, Dockerfile
 gateway/      app.py, openf1.py, static/index.html (3D view), Dockerfile
+docs/         screenshots used in this README
 sql/          init.sql (TimescaleDB tables)
 prometheus/   prometheus.yml
 grafana/      data source provisioning
