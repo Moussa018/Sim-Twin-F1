@@ -1,7 +1,23 @@
 # Sim-Twin-F1
 
 I love Formula 1, and I always wanted to see a race the way the engineers do. So I built my own pit wall. Sim-Twin-F1 takes real race data from the OpenF1 API (the Mexico City GP is my test race) and replays it through Apache Kafka as if the race were happening right now. Speed, throttle, brake, gears, positions, laps, flags, safety cars: it all flows through the pipeline in real time.
+## 3D view
 
+![J.A.R.V.I.S. 3D view: the Mexico City circuit with live cars, race control feed, telemetry cluster and predictions](docs/f1.png)
+
+*The 3D view replaying the Mexico City race: live cars on the real circuit, race control messages, the selected driver's telemetry, the predictor panel and the assistant console.*
+
+
+| Key | Action |
+|---|---|
+| `V` | switch chase camera / orbit view |
+| `←` `→` | select previous / next driver |
+| `M` | toggle voice |
+
+The page loads Three.js from a CDN, so the browser needs internet access. The cars are a stylised low-poly model built in code. `SESSION_KEY` must be the same for the producer and the gateway.
+
+
+## Architecture 
 ```
 OpenF1 API ──► producer ──► Kafka ──► sink ──► TimescaleDB ──► Grafana
                               │
@@ -63,21 +79,7 @@ docker exec f1-kafka /opt/kafka/bin/kafka-console-consumer.sh \
 | Kafka (from host) | localhost:9092 |
 | TimescaleDB | localhost:5432 (f1 / f1pass, database `f1`) |
 
-## 3D view
 
-![J.A.R.V.I.S. 3D view: the Mexico City circuit with live cars, race control feed, telemetry cluster and predictions](docs/f1.png)
-
-*The 3D view replaying the Mexico City race: live cars on the real circuit, race control messages, the selected driver's telemetry, the predictor panel and the assistant console.*
-
-Open http://localhost:8080 once the producer is running. Cars move around the real circuit; the HUD shows the selected driver's telemetry and the predictor's output, with an assistant console that can read alerts aloud.
-
-| Key | Action |
-|---|---|
-| `V` | switch chase camera / orbit view |
-| `←` `→` | select previous / next driver |
-| `M` | toggle voice |
-
-The page loads Three.js from a CDN, so the browser needs internet access. The cars are a stylised low-poly model built in code. `SESSION_KEY` must be the same for the producer and the gateway.
 
 ## Producer configuration
 
