@@ -31,7 +31,9 @@ TABLES = {
     "race.events": ("race_event",
                     ["time", "category", "flag", "message", "lap_number", "driver", "scope"]),
 }
-REQUIRED = {"telemetry": ["time", "driver"], "lap": ["time", "driver", "lap_number"], "race_event": ["time"]}
+TABLES["telemetry.predictions"] = ("prediction", ["time", "driver", "metric", "value"])
+REQUIRED = {"telemetry": ["time", "driver"], "lap": ["time", "driver", "lap_number"], "race_event": ["time"],
+            "prediction": ["time", "driver", "metric"]}
 
 DDL = """
 CREATE TABLE IF NOT EXISTS lap (

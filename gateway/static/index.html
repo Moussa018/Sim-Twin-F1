@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sim-Twin F1 | J.A.R.V.I.S.</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<style>
+:root {
+  --cy: #00e5ff; --cy-dim: rgba(0, 229, 255, 0.35); --bg: #02070d; --panel: rgba(2, 14, 22, 0.58);
+  --warn: #ff9d00; --bad: #ff3b5c; --ok: #38f2a0; --txt: #bfefff;
+  --display: "Orbitron", system-ui, sans-serif; --mono: "Share Tech Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--txt); overflow: hidden; font-family: var(--mono); }
+canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.panel {
+  position: absolute; padding: 12px 14px; background: var(--panel); border: 1px solid var(--cy-dim);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+.title { font-family: var(--display); font-size: 0.7rem; letter-spacing: 0.22em; color: var(--cy); text-transform: uppercase; margin-bottom: 8px; }
+.big { font-family: var(--display); color: #fff; text-shadow: 0 0 12px var(--cy); }
+#brand { top: 14px; left: 14px; min-width: 230px; }
+#brand .name { font-family: var(--display); font-size: 1.15rem; letter-spacing: 0.18em; color: #fff; text-shadow: 0 0 14px var(--cy); }
+#brand .sub { font-size: 0.78rem; color: var(--txt); opacity: 0.8; margin-top: 2px; }
+#status { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 0.78rem; }
+#status i { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+#status.on i { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+#drivers { top: 128px; left: 14px; width: 150px; max-height: calc(100% - 330px); overflow-y: auto; }
+#drivers button {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 4px; background: none; border: 0;
+  border-left: 3px solid transparent; color: var(--txt); font: inherit; font-size: 0.82rem; cursor: pointer; text-align: left;
+}
+#drivers button:hover { background: rgba(0, 229, 255, 0.08); }
+#drivers button.sel { background: rgba(0, 229, 255, 0.16); border-left-color: var(--cy); color: #fff; }
+#drivers button:focus-visible, .btn:focus-visible { outline: 2px solid var(--cy); outline-offset: 1px; }
+#drivers .dot { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+#drivers .kmh { margin-left: auto; opacity: 0.7; font-size: 0.74rem; }
+#events { top: 14px; right: 14px; width: 330px; max-width: 40vw; }
+#events .ev { font-size: 0.78rem; line-height: 1.35; margin-bottom: 5px; padding-left: 8px; border-left: 2px solid var(--cy-dim); }
+#events .ev.flag { border-left-color: var(--warn); } #events .ev.bad { border-left-color: var(--bad); }
+#predict { top: 50%; right: 14px; transform: translateY(-50%); width: 270px; }
+#predict .row { display: flex; justify-content: space-between; align-items: baseline; margin: 6px 0; gap: 8px; }
+#predict .lab { font-size: 0.72rem; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.1em; }
+#predict .val { font-family: var(--display); font-size: 1.1rem; color: #fff; text-shadow: 0 0 10px var(--cy); }
+.bar { height: 8px; background: rgba(0, 229, 255, 0.12); border: 1px solid var(--cy-dim); position: relative; }
+.bar > b { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--cy); box-shadow: 0 0 10px var(--cy); transition: width 0.25s; }
+#wearbar > b { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+#pit { margin-top: 10px; padding: 8px; text-align: center; font-family: var(--display); font-size: 0.78rem; letter-spacing: 0.12em;
+  border: 1px solid var(--cy-dim); color: var(--ok); }
+#pit.alert { color: #fff; background: rgba(255, 59, 92, 0.25); border-color: var(--bad); animation: blink 0.9s infinite; }
+@keyframes blink { 50% { box-shadow: 0 0 18px var(--bad); } }
+#cluster { bottom: 14px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 28px)); display: grid;
+  grid-template-columns: auto 1fr auto; gap: 8px 18px; align-items: center; }
+#speed { font-size: 3rem; line-height: 1; }
+#speed small { font-size: 0.8rem; opacity: 0.7; margin-left: 4px; }
+#gear { font-size: 2.2rem; text-align: center; }
+.bars { display: grid; gap: 8px; }
+.bars .l { font-size: 0.68rem; letter-spacing: 0.12em; opacity: 0.75; margin-bottom: 2px; }
+#brkbar > b { background: var(--bad); box-shadow: 0 0 10px var(--bad); }
+#rpmbar > b { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+#lastlap { font-size: 0.78rem; opacity: 0.85; text-align: right; }
+#console { bottom: 14px; left: 14px; width: 330px; max-width: 28vw; min-height: 120px; }
+#console .line { font-size: 0.8rem; line-height: 1.4; margin-bottom: 4px; opacity: 0.6; }
+#console .line:last-child { opacity: 1; color: #fff; }
+#console .line b { color: var(--cy); font-weight: normal; }
+#controls { bottom: 14px; right: 14px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; width: 260px; }
+.btn { font: inherit; font-size: 0.78rem; color: var(--cy); background: rgba(0, 229, 255, 0.08); border: 1px solid var(--cy-dim); padding: 6px 10px; cursor: pointer; }
+.btn:hover { background: rgba(0, 229, 255, 0.2); }
+.btn[aria-pressed="true"] { background: var(--cy); color: #001018; }
+.label { position: fixed; left: 0; top: 0; pointer-events: none; font-size: 0.72rem; padding: 1px 5px; background: rgba(2, 14, 22, 0.7);
+  border: 1px solid; white-space: nowrap; will-change: transform; }
+.label.sel { color: #fff; box-shadow: 0 0 10px var(--cy); }
+#wait { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; text-align: center; }
+#wait div { font-family: var(--display); letter-spacing: 0.2em; color: var(--cy); text-shadow: 0 0 14px var(--cy); animation: pulse 1.6s infinite; }
+#wait small { display: block; margin-top: 10px; font-family: var(--mono); letter-spacing: 0.05em; opacity: 0.7; }
+@keyframes pulse { 50% { opacity: 0.45; } }
+@media (max-width: 900px) {
+  #console, #events { display: none; }
+  #predict { top: auto; bottom: 150px; transform: none; right: 8px; width: 210px; }
+  #drivers { width: 112px; top: 112px; }
+  #speed { font-size: 2.2rem; }
+  #controls { bottom: auto; top: 14px; right: 14px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) { #wait div, #pit.alert { animation: none; } }
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="labels"></div>
+
+<div id="wait"><div>AWAITING TELEMETRY<small id="waitmsg">Start the stack: docker compose up -d --build</small></div></div>
+
+<section class="panel" id="brand">
+  <div class="name">J.A.R.V.I.S.</div>
+  <div class="sub" id="circuit">Loading circuit...</div>
+  <div id="status"><i></i><span>LINK OFFLINE</span></div>
+</section>
+
+<section class="panel" id="drivers" aria-label="Drivers"><div class="title">Drivers</div><div id="drvlist"></div></section>
+
+<section class="panel" id="events" aria-live="polite"><div class="title">Race control</div><div id="evlist"><div class="ev">No messages yet.</div></div></section>
+
+<section class="panel" id="predict" aria-label="Predictions">
+  <div class="title">Predictions <span id="pdrv"></span></div>
+  <div class="row"><span class="lab">Next lap</span><span class="val" id="pnext">--</span></div>
+  <div class="row"><span class="lab">Tyre wear</span><span class="val" id="pwear">--</span></div>
+  <div class="bar" id="wearbar"><b></b></div>
+  <div class="row"><span class="lab">Laps to limit</span><span class="val" id="pleft">--</span></div>
+  <div id="pit">TYRES OK</div>
+</section>
+
+<section class="panel" id="cluster" aria-label="Telemetry">
+  <div class="big" id="speed"><span id="spv">0</span><small>km/h</small></div>
+  <div class="bars">
+    <div><div class="l">THROTTLE</div><div class="bar" id="thrbar"><b></b></div></div>
+    <div><div class="l">BRAKE</div><div class="bar" id="brkbar"><b></b></div></div>
+    <div><div class="l">RPM</div><div class="bar" id="rpmbar"><b></b></div></div>
+  </div>
+  <div><div class="big" id="gear">N</div><div id="lastlap">LAST --</div></div>
+</section>
+
+<section class="panel" id="console" aria-live="polite"><div class="title">Assistant</div><div id="clines"></div></section>
+
+<div class="panel" id="controls">
+  <button class="btn" id="viewbtn" type="button" aria-pressed="false">VIEW: CHASE (V)</button>
+  <button class="btn" id="voicebtn" type="button" aria-pressed="false">VOICE (M)</button>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+
+const $ = (id) => document.getElementById(id);
+const M = 0.1; // OpenF1 positions are in decimetres
+
+// ---------- scene ----------
+const canvas = $("view");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02070d);
+scene.fog = new THREE.FogExp2(0x02070d, 0.0009);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.5, 20000);
+camera.position.set(0, 600, 900);
+scene.add(new THREE.AmbientLight(0x6fa8c0, 0.9));
+const sun = new THREE.DirectionalLight(0xbfefff, 1.6); sun.position.set(300, 800, 200); scene.add(sun);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.4; controls.enabled = false;
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.55, 0.2);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h, false); composer.setSize(w, h); bloom.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+// ---------- world coordinates ----------
+let origin = { x: 0, y: 0, z: 0 };
+let trackReady = false;
+const toWorld = (x, y, z) => new THREE.Vector3(x * M - origin.x, z * M - origin.z, -(y * M - origin.y));
+
+function buildTrack(pts) {
+  const n = pts.length;
+  origin = { x: pts.reduce((a, p) => a + p[0], 0) / n * M, y: pts.reduce((a, p) => a + p[1], 0) / n * M, z: pts.reduce((a, p) => a + p[2], 0) / n * M };
+  const curve = new THREE.CatmullRomCurve3(pts.map((p) => toWorld(p[0], p[1], p[2])), true, "centripetal");
+  const N = 900, P = curve.getSpacedPoints(N), W = 7;
+  const left = [], right = [], pos = [];
+  for (let i = 0; i < N; i++) {
+    const t = curve.getTangentAt(i / N), nrm = new THREE.Vector3(-t.z, 0, t.x).normalize().multiplyScalar(W);
+    const l = P[i].clone().add(nrm), r = P[i].clone().sub(nrm);
+    left.push(l); right.push(r); pos.push(l.x, l.y, l.z, r.x, r.y, r.z);
+  }
+  const idx = [];
+  for (let i = 0; i < N; i++) { const a = i * 2, b = ((i + 1) % N) * 2; idx.push(a, a + 1, b, a + 1, b + 1, b); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals();
+  scene.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x0a1c28, emissive: 0x041824, roughness: 0.9, side: THREE.DoubleSide })));
+  const edge = new THREE.LineBasicMaterial({ color: 0x00e5ff });
+  scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(left), edge));
+  scene.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(right), edge));
+  // start / finish line
+  const s = new THREE.Mesh(new THREE.BoxGeometry(W * 2, 0.15, 1.6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  s.position.copy(P[0]); s.position.y += 0.1; s.lookAt(P[0].clone().add(curve.getTangentAt(0))); scene.add(s);
+  const minY = Math.min(...P.map((p) => p.y));
+  const grid = new THREE.GridHelper(9000, 180, 0x0b4a5c, 0x06222c); grid.position.y = minY - 4; scene.add(grid);
+  trackReady = true;
+}
+
+// ---------- cars ----------
+function makeCar(hex) {
+  const col = new THREE.Color(hex);
+  const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.25, metalness: 0.5, roughness: 0.35 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x0b0f14, roughness: 0.8 });
+  const g = new THREE.Group();
+  const add = (geo, m, x, y, z, rx = 0, rz = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.rotation.set(rx, 0, rz); g.add(o); return o; };
+  add(new THREE.BoxGeometry(0.9, 0.42, 2.6), mat, 0, 0.45, 0);                    // monocoque
+  add(new THREE.ConeGeometry(0.3, 1.5, 6), mat, 0, 0.38, 2.0, Math.PI / 2);        // nose
+  add(new THREE.BoxGeometry(2.0, 0.07, 0.55), mat, 0, 0.18, 2.6);                  // front wing
+  add(new THREE.BoxGeometry(1.5, 0.55, 0.12), mat, 0, 0.95, -1.9);                 // rear wing
+  add(new THREE.BoxGeometry(0.55, 0.3, 0.9), dark, 0, 0.78, -0.2);                 // engine cover / airbox
+  add(new THREE.TorusGeometry(0.28, 0.04, 6, 14, Math.PI), dark, 0, 0.72, 0.55, 0);// halo
+  const wheel = new THREE.CylinderGeometry(0.36, 0.36, 0.42, 14);
+  [[-1.0, 1.55], [1.0, 1.55], [-1.05, -1.4], [1.05, -1.4]].forEach(([x, z]) => add(wheel, dark, x, 0.36, z, 0, Math.PI / 2));
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(0.9, 0.42, 2.6)), new THREE.LineBasicMaterial({ color: 0xffffff }));
+  edges.position.set(0, 0.45, 0); g.add(edges);
+  g.scale.setScalar(2.4); // bigger than life so it reads from the chase camera
+  return g;
+}
+
+const cars = new Map();       // code -> { group, pos, target, last, heading, want, color, label }
+const info = new Map();       // code -> { colour, team, name }
+const tel = {}, preds = {}, lastLap = {};
+let selected = null;
+
+function ensureCar(code) {
+  if (cars.has(code)) return cars.get(code);
+  const meta = info.get(code) || { colour: "#cfefff" };
+  const group = makeCar(meta.colour);
+  scene.add(group);
+  const label = document.createElement("div");
+  label.className = "label"; label.textContent = code; label.style.borderColor = meta.colour; label.style.color = meta.colour;
+  $("labels").appendChild(label);
+  const c = { group, pos: new THREE.Vector3(), target: new THREE.Vector3(), last: null, heading: 0, want: 0, label, fresh: true };
+  cars.set(code, c);
+  renderDrivers();
+  if (!selected) select(code);
+  return c;
+}
+
+function onPosition(d) {
+  if (!trackReady) return;
+  const c = ensureCar(d.driver);
+  const t = toWorld(d.x, d.y, d.z);
+  if (c.last) {
+    const dx = t.x - c.last.x, dz = t.z - c.last.z;
+    if (dx * dx + dz * dz > 0.64) c.want = Math.atan2(dx, dz);
+  }
+  c.last = t.clone(); c.target.copy(t);
+  if (c.fresh) { c.pos.copy(t); c.fresh = false; $("wait").style.display = "none"; }
+}
+
+const lerpAngle = (a, b, k) => a + (((b - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * k;
+
+// ---------- camera modes ----------
+let mode = "chase";
+function setMode(m) {
+  mode = m;
+  controls.enabled = m === "orbit"; controls.autoRotate = m === "orbit";
+  if (m === "orbit") { camera.position.set(0, 700, 900); controls.target.set(0, 0, 0); }
+  $("viewbtn").textContent = "VIEW: " + (m === "chase" ? "CHASE" : "ORBIT") + " (V)";
+  $("viewbtn").setAttribute("aria-pressed", String(m === "orbit"));
+}
+$("viewbtn").addEventListener("click", () => setMode(mode === "chase" ? "orbit" : "chase"));
+
+// ---------- HUD ----------
+const fmtTime = (s) => { const m = Math.floor(s / 60); return m + ":" + (s - m * 60).toFixed(3).padStart(6, "0"); };
+const set = (id, v) => { const e = $(id); if (e.textContent !== v) e.textContent = v; };
+const bar = (id, pct) => { $(id).firstElementChild.style.width = Math.max(0, Math.min(100, pct)) + "%"; };
+
+function renderDrivers() {
+  const list = $("drvlist"); list.innerHTML = "";
+  [...cars.keys()].sort().forEach((code) => {
+    const b = document.createElement("button"); b.type = "button"; b.dataset.code = code;
+    if (code === selected) b.className = "sel";
+    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = (info.get(code) || {}).colour || "#fff";
+    const name = document.createElement("span"); name.textContent = code;
+    const k = document.createElement("span"); k.className = "kmh"; k.id = "k-" + code; k.textContent = "--";
+    b.append(dot, name, k); b.addEventListener("click", () => select(code)); list.appendChild(b);
+  });
+}
+
+function select(code) {
+  selected = code;
+  document.querySelectorAll("#drvlist button").forEach((b) => b.classList.toggle("sel", b.dataset.code === code));
+  cars.forEach((c, k) => c.label.classList.toggle("sel", k === code));
+  set("pdrv", "| " + code);
+  say(`Tracking ${code}.`);
+}
+
+// ---------- assistant (console + optional voice) ----------
+let voiceOn = false, lastSpoken = 0, typing = null;
+function say(text, speak = false) {
+  const lines = $("clines");
+  const line = document.createElement("div"); line.className = "line";
+  line.innerHTML = "<b>&gt;</b> "; lines.appendChild(line);
+  while (lines.children.length > 5) lines.removeChild(lines.firstChild);
+  const node = document.createTextNode(""); line.appendChild(node);
+  clearInterval(typing); let i = 0;
+  typing = setInterval(() => { node.textContent = text.slice(0, ++i); if (i >= text.length) clearInterval(typing); }, 14);
+  if (speak && voiceOn && "speechSynthesis" in window && Date.now() - lastSpoken > 4000) {
+    lastSpoken = Date.now(); speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text); u.rate = 1.02; u.pitch = 0.9; speechSynthesis.speak(u);
+  }
+}
+function toggleVoice() {
+  voiceOn = !voiceOn; $("voicebtn").setAttribute("aria-pressed", String(voiceOn));
+  say(voiceOn ? "Voice channel enabled." : "Voice channel muted.", voiceOn);
+}
+$("voicebtn").addEventListener("click", toggleVoice);
+addEventListener("keydown", (e) => {
+  if (e.key === "v" || e.key === "V") setMode(mode === "chase" ? "orbit" : "chase");
+  else if (e.key === "m" || e.key === "M") toggleVoice();
+  else if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+    const codes = [...cars.keys()].sort(); if (!codes.length) return;
+    const i = codes.indexOf(selected), step = e.key === "ArrowRight" ? 1 : -1;
+    select(codes[(i + step + codes.length) % codes.length]);
+  }
+});
+
+// ---------- live messages ----------
+function addEvent(d) {
+  const list = $("evlist");
+  if (list.firstElementChild && list.firstElementChild.textContent === "No messages yet.") list.innerHTML = "";
+  const e = document.createElement("div"); const msg = d.message || d.category || "";
+  const bad = /RED FLAG|SAFETY CAR|VIRTUAL/i.test(msg), flag = !!d.flag;
+  e.className = "ev" + (bad ? " bad" : flag ? " flag" : ""); e.textContent = msg;
+  list.insertBefore(e, list.firstChild);
+  while (list.children.length > 5) list.removeChild(list.lastChild);
+  if (bad) say(msg, true);
+}
+
+function onMessage(topic, d) {
+  if (topic === "car.position") onPosition(d);
+  else if (topic === "telemetry.raw") tel[d.driver] = d;
+  else if (topic === "race.laps") { if (d.lap_duration) lastLap[d.driver] = d.lap_duration; }
+  else if (topic === "race.events") addEvent(d);
+  else if (topic === "telemetry.predictions") {
+    (preds[d.driver] = preds[d.driver] || {})[d.metric] = d;
+    if (d.driver === selected && d.message && d.metric !== "next_lap_time") say(`${d.driver}: ${d.message}`, d.metric === "pit_recommended" && d.value === 1);
+  }
+}
+
+let ws, retry = 0;
+function connect() {
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => { retry = 0; $("status").className = "on"; $("status").lastElementChild.textContent = "LINK ONLINE"; say("Telemetry link established."); };
+  ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); onMessage(m.topic, m.data); } catch (e) { /* ignore a bad frame */ } };
+  ws.onclose = () => { $("status").className = ""; $("status").lastElementChild.textContent = "LINK OFFLINE"; setTimeout(connect, Math.min(5000, 1000 + 500 * ++retry)); };
+}
+
+// ---------- boot ----------
+async function boot() {
+  try { (await (await fetch("/api/drivers")).json()).forEach((d) => info.set(d.code, d)); } catch (e) { /* colours fall back to white */ }
+  for (;;) {
+    try {
+      const r = await fetch("/api/track"); if (!r.ok) throw new Error(r.status);
+      const t = await r.json(); buildTrack(t.points);
+      $("circuit").textContent = `${t.circuit} | ${t.session} | ${t.date}`; break;
+    } catch (e) { $("waitmsg").textContent = "Building the circuit from OpenF1 data..."; await new Promise((r) => setTimeout(r, 3000)); }
+  }
+  $("waitmsg").textContent = "Circuit ready. Waiting for the producer...";
+  connect();
+}
+boot();
+
+// ---------- frame loop ----------
+const clock = new THREE.Clock(), v = new THREE.Vector3(), back = new THREE.Vector3(), want = new THREE.Vector3();
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, clock.getDelta());
+  cars.forEach((c, code) => {
+    c.pos.lerp(c.target, 1 - Math.exp(-dt * 9));
+    c.heading = lerpAngle(c.heading, c.want, 1 - Math.exp(-dt * 8));
+    c.group.position.copy(c.pos); c.group.rotation.y = c.heading;
+    v.copy(c.pos); v.y += 4; v.project(camera);
+    const on = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    c.label.style.display = on ? "block" : "none";
+    if (on) c.label.style.transform = `translate(${(v.x * 0.5 + 0.5) * innerWidth}px, ${(-v.y * 0.5 + 0.5) * innerHeight - 22}px) translateX(-50%)`;
+  });
+  const car = cars.get(selected);
+  if (mode === "chase" && car) {
+    const fx = Math.sin(car.heading), fz = Math.cos(car.heading);
+    back.set(car.pos.x - fx * 24, car.pos.y + 9, car.pos.z - fz * 24);
+    camera.position.lerp(back, 1 - Math.exp(-dt * 3.5));
+    want.set(car.pos.x + fx * 14, car.pos.y + 2, car.pos.z + fz * 14); camera.lookAt(want);
+  } else if (mode === "orbit") controls.update();
+  updateHud();
+  composer.render();
+}
+function updateHud() {
+  document.querySelectorAll("#drvlist .kmh").forEach((e) => { const t = tel[e.id.slice(2)]; if (t) e.textContent = Math.round(t.speed); });
+  const t = tel[selected], p = preds[selected] || {};
+  if (t) {
+    set("spv", String(Math.round(t.speed)));
+    set("gear", t.gear > 0 ? String(t.gear) : "N");
+    bar("thrbar", t.throttle); bar("brkbar", t.brake); bar("rpmbar", t.rpm / 130);
+    if (t.tyre_wear != null) { set("pwear", t.tyre_wear.toFixed(0) + "%"); bar("wearbar", t.tyre_wear); }
+  }
+  set("lastlap", "LAST " + (lastLap[selected] ? fmtTime(lastLap[selected]) : "--"));
+  set("pnext", p.next_lap_time ? fmtTime(p.next_lap_time.value) : "--");
+  set("pleft", p.tyre_laps_left ? p.tyre_laps_left.value.toFixed(1) : "--");
+  const alert = p.pit_recommended && p.pit_recommended.value === 1;
+  const pit = $("pit"), cls = alert ? "alert" : "", txt = alert ? "PIT WINDOW OPEN" : "TYRES OK";
+  if (pit.className !== cls) pit.className = cls;
+  set("pit", txt);
+}
+frame();
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+confluent-kafka>=2.4
+requests>=2.31

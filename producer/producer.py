@@ -5,6 +5,7 @@ Topics written:
   telemetry.latest  same samples, log-compacted: last known state per driver
   race.laps         one message per completed lap (key = driver)
   race.events       race control messages: flags, safety car, penalties (key = "race")
+  car.position      x/y/z position on track per driver (key = driver), for the 3D view
 
 A cursor moves through the session at SPEED x real time (replay of a finished
 session, or following a live one). Samples are stamped with the current time.
@@ -105,12 +106,16 @@ def fetcher(api, cfg, session, out):
         ahead = (stop - datetime.now(timezone.utc)).total_seconds()
         if ahead > 0:  # live: do not ask for data that does not exist yet
             time.sleep(ahead)
-        try:
-            rows = api.get("car_data", session_key=session["session_key"],
-                           **{"date>": iso(cursor), "date<=": iso(stop)})
-        except Exception as e:  # keep going on a bad window
-            log.warning("car_data %s: %s", iso(cursor), e)
-            rows = []
+        rows = []  # (kind, row): "car" = telemetry, "loc" = x/y/z position
+        for kind, endpoint in (("car", "car_data"), ("loc", "location")):
+            try:
+                got = api.get(endpoint, session_key=session["session_key"],
+                              **{"date>": iso(cursor), "date<=": iso(stop)})
+            except Exception as e:  # keep going on a bad window
+                log.warning("%s %s: %s", endpoint, iso(cursor), e)
+                got = []
+            rows += [(kind, r) for r in got]
+        rows.sort(key=lambda kr: parse(kr[1]["date"]))
         out.put(rows)
         cursor = stop
         if cursor > end:
@@ -191,7 +196,7 @@ def main():
             if batch == "RESET":
                 base_data, next_event = None, 0
                 continue
-            for row in batch:
+            for kind, row in batch:
                 driver = names.get(row["driver_number"])
                 if driver is None:
                     continue
@@ -209,6 +214,11 @@ def main():
                     _, topic, key, payload = events[next_event]
                     send(topic, key, {"time": now, **payload})
                     next_event += 1
+
+                if kind == "loc":
+                    send("car.position", driver, {"time": now, "driver": driver,
+                                                  "x": row["x"], "y": row["y"], "z": row["z"]})
+                    continue
 
                 sample = {
                     "time": now, "driver": driver,

@@ -18,4 +18,4 @@ scrape_configs:
       - targets: ["host.docker.internal:8001"]
   - job_name: f1-predictor
     static_configs:
-      - targets: ["host.docker.internal:8002"]
+      - targets: ["predictor:8002"]

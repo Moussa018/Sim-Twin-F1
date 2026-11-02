@@ -33,6 +33,7 @@ services:
         create telemetry.latest 3 --config cleanup.policy=compact --config min.cleanable.dirty.ratio=0.01 --config segment.ms=60000
         create race.laps 3
         create race.events 1
+        create car.position 6 --config retention.ms=3600000
         create telemetry.dlq 1 --config retention.ms=604800000
         create telemetry.kpi 3
         create telemetry.predictions 3
@@ -65,6 +66,31 @@ services:
         condition: service_completed_successfully
       timescaledb:
         condition: service_started
+    restart: unless-stopped
+
+  predictor:
+    build: ./predictor
+    container_name: f1-predictor
+    environment:
+      KAFKA_BROKERS: kafka:19092
+    ports:
+      - "8002:8002"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  gateway:
+    build: ./gateway
+    container_name: f1-gateway
+    environment:
+      KAFKA_BROKERS: kafka:19092
+      # SESSION_KEY: latest   # must match the producer's session
+    ports:
+      - "8080:8080"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   timescaledb:
