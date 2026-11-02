@@ -1,44 +1,44 @@
 # Sim-Twin-F1
 
-Pipeline de télémétrie F1 en flux continu : de vraies données de course (API OpenF1) sont rejouées vers Apache Kafka, stockées dans TimescaleDB, puis supervisées avec Prometheus et Grafana.
+Streaming F1 telemetry pipeline: real race data (OpenF1 API) is replayed into Apache Kafka, stored in TimescaleDB, and monitored with Prometheus and Grafana.
 
 ```
 OpenF1 API ──► producer (Python) ──► Kafka ──► sink (Python) ──► TimescaleDB ──► Grafana
                      │                                │
-                     └──────── métriques ────────► Prometheus
+                     └──────── metrics ──────────► Prometheus
 ```
 
-## Fonctionnement
+## How it works
 
-Le producer lit une session de course sur [OpenF1](https://openf1.org) et avance dans le temps à la vitesse réelle (réglable). Chaque mesure est horodatée à l'instant d'envoi : les tableaux de bord voient un flux en direct, même pour une course terminée. Quand la session se termine, elle redémarre au début.
+The producer reads a race session from [OpenF1](https://openf1.org) and moves through it at real-time speed (configurable). Every reading is stamped with the time it is sent, so dashboards see a live stream even when the race is over. When the session ends, it starts again from the beginning.
 
-### Topics Kafka
+### Kafka topics
 
-| Topic | Contenu | Clé | Partitions | Particularité |
+| Topic | Content | Key | Partitions | Notes |
 |---|---|---|---|---|
-| `telemetry.raw` | vitesse, accélérateur, frein, rapport, régime, usure pneus | pilote | 6 | conservé 1 jour |
-| `telemetry.latest` | mêmes mesures | pilote | 3 | compacté : dernier état de chaque pilote |
-| `race.laps` | un message par tour terminé | pilote | 3 | |
-| `race.events` | drapeaux, safety car, pénalités | `race` | 1 | ordre global |
-| `telemetry.dlq` | messages invalides rejetés par le sink | pilote | 1 | conservé 7 jours |
-| `telemetry.kpi`, `telemetry.predictions` | réservés aux étapes suivantes | | 3 | pas encore utilisés |
+| `telemetry.raw` | speed, throttle, brake, gear, RPM, tyre wear | driver | 6 | 1 day retention |
+| `telemetry.latest` | same readings | driver | 3 | compacted: last state of each driver |
+| `race.laps` | one message per completed lap | driver | 3 | |
+| `race.events` | flags, safety car, penalties | `race` | 1 | global ordering |
+| `telemetry.dlq` | invalid messages rejected by the sink | driver | 1 | 7 day retention |
+| `telemetry.kpi`, `telemetry.predictions` | reserved for later steps | | 3 | not used yet |
 
 ### Services
 
-- **producer** (`producer/`) : lit OpenF1 et publie sur Kafka. Producer idempotent, `acks=all`, compression lz4, en-têtes `source` et `session_key`. Métriques sur le port 8000.
-- **sink** (`sink/`) : consommateur du groupe `f1-sink`. Écrit par lots dans TimescaleDB (`telemetry`, `lap`, `race_event`). Les offsets sont validés à la main après l'écriture en base (au moins une fois). Un message invalide est copié dans `telemetry.dlq` avec l'erreur en en-tête. Métriques sur le port 8003.
-- **kafka**, **timescaledb**, **prometheus**, **grafana** : infrastructure, définie dans `docker-compose.yml`.
+- **producer** (`producer/`): reads OpenF1 and publishes to Kafka. Idempotent producer, `acks=all`, lz4 compression, `source` and `session_key` headers. Metrics on port 8000.
+- **sink** (`sink/`): consumer of the `f1-sink` group. Writes batches to TimescaleDB (`telemetry`, `lap`, `race_event`). Offsets are committed manually after the database write (at-least-once). An invalid message is copied to `telemetry.dlq` with the error in a header. Metrics on port 8003.
+- **kafka**, **timescaledb**, **prometheus**, **grafana**: infrastructure, defined in `docker-compose.yml`.
 
-## Démarrage
+## Getting started
 
-Prérequis : Docker et Docker Compose.
+Requirements: Docker and Docker Compose.
 
 ```bash
 docker compose up -d --build
 docker compose logs -f producer sink
 ```
 
-Vérifier que les données arrivent :
+Check that data is flowing:
 
 ```bash
 docker exec f1-timescaledb psql -U f1 -c "select driver, count(*) from telemetry group by 1"
@@ -46,46 +46,46 @@ docker exec f1-kafka /opt/kafka/bin/kafka-console-consumer.sh \
   --bootstrap-server kafka:19092 --topic telemetry.raw --max-messages 5
 ```
 
-| Service | Adresse |
+| Service | Address |
 |---|---|
 | Grafana | http://localhost:3000 (admin / admin) |
 | Prometheus | http://localhost:9090 |
-| Métriques producer | http://localhost:8000/metrics |
-| Métriques sink | http://localhost:8003/metrics |
-| Kafka (hôte) | localhost:9092 |
-| TimescaleDB | localhost:5432 (f1 / f1pass, base `f1`) |
+| Producer metrics | http://localhost:8000/metrics |
+| Sink metrics | http://localhost:8003/metrics |
+| Kafka (from host) | localhost:9092 |
+| TimescaleDB | localhost:5432 (f1 / f1pass, database `f1`) |
 
-## Configuration du producer
+## Producer configuration
 
-Variables d'environnement, à définir dans `docker-compose.yml` :
+Environment variables, set in `docker-compose.yml`:
 
-| Variable | Défaut | Rôle |
+| Variable | Default | Purpose |
 |---|---|---|
-| `KAFKA_BROKERS` | `localhost:9092` | adresse des brokers (`kafka:19092` dans Docker) |
-| `SESSION_KEY` | `latest` | session OpenF1 à rejouer |
-| `DRIVERS` | tous | filtre par acronymes, ex. `VER,NOR` |
-| `SPEED` | `1` | vitesse du rejeu (`5` = cinq fois plus vite) |
-| `START_MIN` | `0` | minutes après le début de la session |
-| `WINDOW_S` | `5` | secondes de données chargées par appel API |
-| `LOOP` | `1` | `1` pour recommencer à la fin de la session |
-| `METRICS_PORT` | `8000` | port Prometheus |
+| `KAFKA_BROKERS` | `localhost:9092` | broker address (`kafka:19092` inside Docker) |
+| `SESSION_KEY` | `latest` | OpenF1 session to replay |
+| `DRIVERS` | all | filter by acronym, e.g. `VER,NOR` |
+| `SPEED` | `1` | replay speed (`5` = five times faster) |
+| `START_MIN` | `0` | minutes after the session start |
+| `WINDOW_S` | `5` | seconds of data fetched per API call |
+| `LOOP` | `1` | `1` to restart when the session ends |
+| `METRICS_PORT` | `8000` | Prometheus port |
 
-## Limites connues
+## Known limitations
 
-- OpenF1 ne fournit pas la température des pneus : `tyre_temp` vaut `null`.
-- L'usure des pneus est une estimation (2 % par tour, calculée depuis les relais et les tours), pas une mesure.
-- Les tours et événements de course sont chargés une fois au démarrage : ils conviennent au rejeu de sessions passées.
-- Suivre une session réellement en cours demande en général un compte OpenF1 payant.
-- Le sink garantit « au moins une fois » : un doublon est possible après une panne.
-- Le calcul des KPI par fenêtre (`kpi_window`) et les prédictions ne sont pas encore implémentés.
+- OpenF1 does not provide tyre temperature: `tyre_temp` is `null`.
+- Tyre wear is an estimate (2% per lap, computed from stints and laps), not a measurement.
+- Laps and race events are loaded once at startup, so they suit replaying past sessions.
+- Following a session that is actually live usually requires a paid OpenF1 account.
+- The sink guarantees at-least-once delivery: a duplicate is possible after a failure.
+- Windowed KPIs (`kpi_window`) and predictions are not implemented yet.
 
-## Structure
+## Project layout
 
 ```
 producer/     producer.py, openf1.py, requirements.txt, Dockerfile
 sink/         sink.py, requirements.txt, Dockerfile
-sql/          init.sql (tables TimescaleDB)
+sql/          init.sql (TimescaleDB tables)
 prometheus/   prometheus.yml
-grafana/      provisioning des sources de données
+grafana/      data source provisioning
 docker-compose.yml
 ```
