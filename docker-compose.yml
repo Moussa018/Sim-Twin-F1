@@ -24,10 +24,48 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        for t in telemetry.raw telemetry.kpi telemetry.predictions; do
+        create() {
+          t=$$1; p=$$2; shift 2
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
-            --create --if-not-exists --topic $$t --partitions 3 --replication-factor 1
-        done
+            --create --if-not-exists --topic $$t --partitions $$p --replication-factor 1 "$$@"
+        }
+        create telemetry.raw 6 --config retention.ms=86400000
+        create telemetry.latest 3 --config cleanup.policy=compact --config min.cleanable.dirty.ratio=0.01 --config segment.ms=60000
+        create race.laps 3
+        create race.events 1
+        create telemetry.dlq 1 --config retention.ms=604800000
+        create telemetry.kpi 3
+        create telemetry.predictions 3
+
+  producer:
+    build: ./producer
+    container_name: f1-producer
+    environment:
+      KAFKA_BROKERS: kafka:19092
+      # DRIVERS: VER,NOR   # optional filter, default = all drivers
+      # SPEED: "1"         # replay speed
+      # SESSION_KEY: latest
+    ports:
+      - "8000:8000"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  sink:
+    build: ./sink
+    container_name: f1-sink
+    environment:
+      KAFKA_BROKERS: kafka:19092
+      PG_DSN: host=timescaledb dbname=f1 user=f1 password=f1pass
+    ports:
+      - "8003:8003"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      timescaledb:
+        condition: service_started
+    restart: unless-stopped
 
   timescaledb:
     image: timescale/timescaledb:latest-pg16

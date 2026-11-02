@@ -9,7 +9,10 @@ scrape_configs:
   # Added in later steps (host.docker.internal = apps running on your machine)
   - job_name: f1-producer
     static_configs:
-      - targets: ["host.docker.internal:8000"]
+      - targets: ["producer:8000"]
+  - job_name: f1-sink
+    static_configs:
+      - targets: ["sink:8003"]
   - job_name: f1-streams
     static_configs:
       - targets: ["host.docker.internal:8001"]
