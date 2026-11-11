@@ -1,4 +1,5 @@
 """Small client for the OpenF1 REST API (https://openf1.org)."""
+import threading
 import time
 
 import requests
@@ -11,14 +12,16 @@ class OpenF1:
     def __init__(self):
         self.http = requests.Session()
         self._last = 0.0
+        self._lock = threading.Lock()  # call starts stay spaced even with several threads
 
     def get(self, endpoint, **params):
-        """GET /endpoint and return the JSON list. Retries on 429 / 5xx."""
+        """GET /endpoint and return the JSON list. Retries on 429 / 5xx. Thread-safe."""
         for attempt in range(5):
-            wait = MIN_INTERVAL - (time.monotonic() - self._last)
-            if wait > 0:
-                time.sleep(wait)
-            self._last = time.monotonic()
+            with self._lock:  # only the start is serialized, the HTTP calls overlap
+                wait = MIN_INTERVAL - (time.monotonic() - self._last)
+                if wait > 0:
+                    time.sleep(wait)
+                self._last = time.monotonic()
             r = self.http.get(f"{BASE}/{endpoint}", params=params, timeout=30)
             if r.status_code == 429 or r.status_code >= 500:
                 time.sleep(2 * (attempt + 1))

@@ -22,6 +22,7 @@ import os
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from confluent_kafka import Producer
@@ -101,16 +102,20 @@ def fetcher(api, cfg, session, out):
     end = parse(session["date_end"])
     window = timedelta(seconds=cfg["window_s"])
     cursor = start
+    pool = ThreadPoolExecutor(2)
     while True:
         stop = cursor + window
         ahead = (stop - datetime.now(timezone.utc)).total_seconds()
         if ahead > 0:  # live: do not ask for data that does not exist yet
             time.sleep(ahead)
         rows = []  # (kind, row): "car" = telemetry, "loc" = x/y/z position
-        for kind, endpoint in (("car", "car_data"), ("loc", "location")):
+        # Both endpoints are independent: ask for them at the same time.
+        futures = [(kind, endpoint, pool.submit(api.get, endpoint, session_key=session["session_key"],
+                                                **{"date>": iso(cursor), "date<": iso(stop)}))
+                   for kind, endpoint in (("car", "car_data"), ("loc", "location"))]
+        for kind, endpoint, future in futures:
             try:
-                got = api.get(endpoint, session_key=session["session_key"],
-                              **{"date>": iso(cursor), "date<": iso(stop)})
+                got = future.result()
             except Exception as e:  # keep going on a bad window
                 log.warning("%s %s: %s", endpoint, iso(cursor), e)
                 got = []
