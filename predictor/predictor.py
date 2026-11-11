@@ -5,11 +5,15 @@ For every completed lap of a driver it publishes three predictions (key = driver
   tyre_laps_left    laps until tyre wear reaches TYRE_LIMIT, from the recent wear rate
   pit_recommended   1 when the tyres are within PIT_WINDOW laps of the limit, else 0
 
+A Monte Carlo strategy simulation (strategy.py) adds mc_best_pit_lap, mc_gain_s and
+mc_win_prob once the race length is known (race.laps carries total_laps, or set TOTAL_LAPS).
+
 Each message also carries a human readable "message" used by the 3D view.
 It is a simple statistical model on purpose: replace predict() with a trained
 model later without touching the Kafka plumbing.
 
-Env: KAFKA_BROKERS, TYRE_LIMIT (80), PIT_WINDOW (5), METRICS_PORT (8002)
+Env: KAFKA_BROKERS, TYRE_LIMIT (80), PIT_WINDOW (5), METRICS_PORT (8002),
+     TOTAL_LAPS (0 = from the producer), PIT_LOSS (22 s), WEAR_PER_LAP (2.0), MC_RUNS (1000)
 """
 import json
 import logging
@@ -21,13 +25,20 @@ from datetime import datetime, timezone
 from confluent_kafka import Consumer, Producer
 from prometheus_client import Counter, Gauge, start_http_server
 
+import strategy
+
 log = logging.getLogger("predictor")
 
 TYRE_LIMIT = float(os.getenv("TYRE_LIMIT", "80"))
 PIT_WINDOW = float(os.getenv("PIT_WINDOW", "5"))
 OUT_TOPIC = "telemetry.predictions"
+TOTAL_LAPS = int(os.getenv("TOTAL_LAPS", "0"))          # race length, for live sessions
+PIT_LOSS = float(os.getenv("PIT_LOSS", "22"))           # seconds a stop costs at this circuit
+WEAR_PER_LAP = float(os.getenv("WEAR_PER_LAP", "2.0"))  # must match the producer's tyre model
+MC_RUNS = int(os.getenv("MC_RUNS", "1000"))             # simulated races per driver and lap
 
 PUBLISHED = Counter("f1_predictions_total", "Predictions published.", ["metric"])
+MC_GAIN = Gauge("f1_mc_gain_seconds", "Expected seconds saved by the best stop (Monte Carlo).", ["driver"])
 LAPS_LEFT = Gauge("f1_tyre_laps_left", "Predicted laps until the tyre limit.", ["driver"])
 NEXT_LAP = Gauge("f1_next_lap_time_seconds", "Predicted next lap time.", ["driver"])
 
@@ -35,8 +46,59 @@ NEXT_LAP = Gauge("f1_next_lap_time_seconds", "Predicted next lap time.", ["drive
 class Driver:
     def __init__(self):
         self.wear = None
+        self.age = None               # laps on the current tyres
         self.laps = deque(maxlen=8)   # (lap_number, duration) of clean laps
         self.wears = deque(maxlen=4)  # (lap_number, wear) at the end of recent laps
+
+
+class Race:
+    """What the whole field shares: laps run, total laps, safety cars."""
+
+    def __init__(self):
+        self.lap = 0                  # furthest lap seen
+        self.total = TOTAL_LAPS or None
+        self.sc_deployed = 0
+        self.sc_active = False
+
+    def event(self, data):
+        msg = (data.get("message") or "").upper()
+        if "SAFETY CAR" in msg and "VIRTUAL" not in msg:
+            if "DEPLOYED" in msg:
+                self.sc_deployed += 1
+                self.sc_active = True
+            elif "IN THIS LAP" in msg:
+                self.sc_active = False
+        elif "TRACK CLEAR" in msg or "GREEN LIGHT" in msg:
+            self.sc_active = False
+
+
+def monte_carlo(driver, st, race, lap):
+    """Run the strategy simulation after a lap; returns a list of (metric, value, message, extra)."""
+    if not race.total or st.age is None or st.wear is None:
+        return []
+    fit = strategy.fit_pace(st.laps)
+    if not fit:
+        return []
+    pace, slope, se, next_lap = fit
+    remaining = race.total - next_lap + 1
+    if remaining < 3:
+        return []
+    p_sc = strategy.sc_rate(race.sc_deployed, max(race.lap, 1))
+    r = strategy.simulate(pace=pace, slope=slope, slope_se=se, age=st.age, remaining=remaining,
+                          next_lap=next_lap, pit_loss=PIT_LOSS, p_sc=p_sc, sc_now=race.sc_active,
+                          age_limit=TYRE_LIMIT / WEAR_PER_LAP, runs=MC_RUNS,
+                          seed=strategy.seed_for(driver, lap))
+    if not r:
+        return []
+    if r["best_lap"]:
+        msg = (f"Monte Carlo, {MC_RUNS} runs: stop on lap {r['best_lap']} saves {r['gain_s']:.1f} s "
+               f"over staying out ({r['win_prob'] * 100:.0f}% of runs). Safety car risk {p_sc * 100:.1f}% per lap.")
+    else:
+        msg = f"Monte Carlo, {MC_RUNS} runs: staying out is the cheapest option. Safety car risk {p_sc * 100:.1f}% per lap."
+    curve = [[n, round(g, 2), round(p, 3)] for n, g, p in r["curve"]]
+    return [("mc_best_pit_lap", r["best_lap"], msg, {"curve": curve, "total_laps": race.total}),
+            ("mc_gain_s", round(r["gain_s"], 2), None, {}),
+            ("mc_win_prob", round(r["win_prob"], 3), None, {})]
 
 
 def fmt_time(seconds):
@@ -96,11 +158,12 @@ def main():
 
     consumer = Consumer({"bootstrap.servers": brokers, "group.id": "f1-predictor",
                          "auto.offset.reset": "latest", "enable.auto.commit": True})
-    consumer.subscribe(["telemetry.raw", "race.laps"])
+    consumer.subscribe(["telemetry.raw", "race.laps", "race.events"])
     producer = Producer({"bootstrap.servers": brokers, "enable.idempotence": True, "acks": "all"})
     drivers = {}
     log.info("predicting from telemetry.raw + race.laps -> %s", OUT_TOPIC)
 
+    race = Race()
     try:
         while True:
             m = consumer.poll(1.0)
@@ -109,6 +172,9 @@ def main():
                 continue
             try:
                 data = json.loads(m.value())
+                if m.topic() == "race.events":
+                    race.event(data)
+                    continue
                 driver = data["driver"]
             except (ValueError, KeyError):
                 continue
@@ -121,23 +187,37 @@ def main():
             lap, dur = data.get("lap_number"), data.get("lap_duration")
             if lap is None:
                 continue
+            race.lap = max(race.lap, lap)
+            race.total = data.get("total_laps") or race.total
+            new_tyres = False
             if st.wear is not None:
                 if st.wears and st.wear < st.wears[-1][1] - 5:  # wear dropped: new tyres
                     st.wears.clear()
+                    new_tyres = True
                 st.wears.append((lap, st.wear))
+            if data.get("is_pit_out") or new_tyres:
+                st.age = 0
+            elif st.age is None:
+                st.age = round((st.wear or 0) / WEAR_PER_LAP)  # joined mid-stint: guess from wear
+            else:
+                st.age += 1
             if dur and not data.get("is_pit_out"):
                 st.laps.append((lap, dur))
 
             now = datetime.now(timezone.utc).isoformat()
-            for metric, value, message in predict(driver, st, lap):
+            results = [(*p, {}) for p in predict(driver, st, lap)]
+            results += monte_carlo(driver, st, race, lap)
+            for metric, value, message, extra in results:
                 producer.produce(OUT_TOPIC, key=driver, value=json.dumps({
                     "time": now, "driver": driver, "metric": metric, "value": value,
-                    "lap_number": lap, "message": message}))
+                    "lap_number": lap, "message": message, **extra}))
                 PUBLISHED.labels(metric).inc()
                 if metric == "tyre_laps_left":
                     LAPS_LEFT.labels(driver).set(value)
                 elif metric == "next_lap_time":
                     NEXT_LAP.labels(driver).set(value)
+                elif metric == "mc_gain_s":
+                    MC_GAIN.labels(driver).set(value)
             producer.poll(0)
     except KeyboardInterrupt:
         pass

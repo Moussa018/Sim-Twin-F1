@@ -74,7 +74,7 @@ class TyreModel:
         return None
 
 
-def build_events(laps, race_control, names):
+def build_events(laps, race_control, names, total_laps=None):
     """Laps and race-control messages as a time-sorted list of (time, topic, key, payload)."""
     events = []
     for lap in laps:
@@ -85,6 +85,7 @@ def build_events(laps, race_control, names):
                 "driver": driver, "lap_number": lap["lap_number"], "lap_duration": lap["lap_duration"],
                 "sector1": lap.get("duration_sector_1"), "sector2": lap.get("duration_sector_2"),
                 "sector3": lap.get("duration_sector_3"), "is_pit_out": bool(lap.get("is_pit_out_lap")),
+                "total_laps": total_laps,  # lets the predictor simulate the rest of the race
             }))
     for rc in race_control:
         events.append((parse(rc["date"]), "race.events", "race", {
@@ -155,7 +156,10 @@ def main():
         raise SystemExit("no matching drivers in this session")
     laps = api.get("laps", session_key=sk)
     tyres = TyreModel(laps, api.get("stints", session_key=sk))
-    events = build_events(laps, api.get("race_control", session_key=sk), names)
+    # The race length is only known once the session is over; for a live one use TOTAL_LAPS in the predictor.
+    finished = parse(session["date_end"]) < datetime.now(timezone.utc)
+    total_laps = max((l["lap_number"] for l in laps), default=None) if finished else None
+    events = build_events(laps, api.get("race_control", session_key=sk), names, total_laps)
     first = parse(session["date_start"]) + timedelta(minutes=cfg["start_min"])
     events = [e for e in events if e[0] >= first]  # skip what happened before the replay start
     log.info("session %s: %s %s (%s), %d drivers, %d laps/events",

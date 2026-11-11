@@ -73,6 +73,9 @@ services:
     container_name: f1-predictor
     environment:
       KAFKA_BROKERS: kafka:19092
+      # TOTAL_LAPS: "57"   # race length, only needed for a live session
+      # PIT_LOSS: "22"     # seconds a pit stop costs at this circuit
+      # MC_RUNS: "1000"    # simulated races per driver and lap
     ports:
       - "8002:8002"
     depends_on:
