@@ -353,7 +353,13 @@ let ws, retry = 0;
 function connect() {
   ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
   ws.onopen = () => { retry = 0; $("status").className = "on"; $("status").lastElementChild.textContent = "LINK ONLINE"; say("Telemetry link established."); };
-  ws.onmessage = (ev) => { try { const m = JSON.parse(ev.data); onMessage(m.topic, m.data); } catch (e) { /* ignore a bad frame */ } };
+  ws.onmessage = (ev) => {
+    let frame;
+    try { frame = JSON.parse(ev.data); } catch (e) { return; } // ignore a bad frame
+    for (const m of Array.isArray(frame) ? frame : [frame]) {
+      try { onMessage(m.topic, m.data); } catch (e) { /* one bad message must not drop the rest */ }
+    }
+  };
   ws.onclose = () => { $("status").className = ""; $("status").lastElementChild.textContent = "LINK OFFLINE"; setTimeout(connect, Math.min(5000, 1000 + 500 * ++retry)); };
 }
 

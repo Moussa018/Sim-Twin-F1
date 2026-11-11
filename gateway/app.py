@@ -29,6 +29,8 @@ log = logging.getLogger("gateway")
 
 TOPICS = ["telemetry.raw", "car.position", "race.laps", "race.events", "telemetry.predictions"]
 SESSION_KEY = os.getenv("SESSION_KEY", "latest")
+BATCH_S = float(os.getenv("WS_BATCH_MS", "50")) / 1000  # WebSocket frames carry ~50 ms of messages
+MAX_BATCH = 500
 
 clients = set()    # one asyncio.Queue per connected browser
 state = {}         # (topic, key) -> last message text, replayed to new browsers
@@ -133,10 +135,13 @@ async def ws(sock: WebSocket):
     try:
         while not watcher.done():
             try:
-                text = await asyncio.wait_for(q.get(), 1.0)
+                batch = [await asyncio.wait_for(q.get(), 1.0)]
             except asyncio.TimeoutError:
                 continue
-            await sock.send_text(text)
+            await asyncio.sleep(BATCH_S)  # let messages pile up, then send them in one frame
+            while not q.empty() and len(batch) < MAX_BATCH:
+                batch.append(q.get_nowait())
+            await sock.send_text("[" + ",".join(batch) + "]")
     except Exception:
         pass
     finally:
