@@ -4,7 +4,7 @@ import time
 import requests
 
 BASE = "https://api.openf1.org/v1"
-MIN_INTERVAL = 0.4  # seconds between calls, the free tier allows ~3 requests/s
+MIN_INTERVAL = 0.4  # seconds between calls, the free tier allowsj ~3 requests/s
 
 
 class OpenF1:

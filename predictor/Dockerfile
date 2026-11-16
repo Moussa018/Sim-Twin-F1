@@ -2,5 +2,5 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY predictor.py strategy.py .
+COPY predictor.py strategy.py ml.py train.py .
 CMD ["python", "-u", "predictor.py"]

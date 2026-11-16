@@ -1,7 +1,9 @@
 """Predictor: reads telemetry.raw and race.laps, publishes telemetry.predictions.
 
 For every completed lap of a driver it publishes three predictions (key = driver):
-  next_lap_time     forecast of the next lap in seconds (linear trend of recent clean laps)
+  next_lap_time     forecast of the next lap in seconds: a gradient boosting model trained
+                    on past races (train.py, ml.py), or a linear trend of recent clean
+                    laps when no trained model is found
   tyre_laps_left    laps until tyre wear reaches TYRE_LIMIT, from the recent wear rate
   pit_recommended   1 when the tyres are within PIT_WINDOW laps of the limit, else 0
 
@@ -9,8 +11,6 @@ A Monte Carlo strategy simulation (strategy.py) adds mc_best_pit_lap, mc_gain_s 
 mc_win_prob once the race length is known (race.laps carries total_laps, or set TOTAL_LAPS).
 
 Each message also carries a human readable "message" used by the 3D view.
-It is a simple statistical model on purpose: replace predict() with a trained
-model later without touching the Kafka plumbing.
 
 Env: KAFKA_BROKERS, TYRE_LIMIT (80), PIT_WINDOW (5), METRICS_PORT (8002),
      TOTAL_LAPS (0 = from the producer), PIT_LOSS (22 s), WEAR_PER_LAP (2.0), MC_RUNS (1000)
@@ -18,13 +18,13 @@ Env: KAFKA_BROKERS, TYRE_LIMIT (80), PIT_WINDOW (5), METRICS_PORT (8002),
 import json
 import logging
 import os
-import statistics
 from collections import deque
 from datetime import datetime, timezone
 
 from confluent_kafka import Consumer, Producer
 from prometheus_client import Counter, Gauge, start_http_server
 
+import ml
 import strategy
 
 log = logging.getLogger("predictor")
@@ -48,6 +48,8 @@ class Driver:
         self.wear = None
         self.age = None               # laps on the current tyres
         self.laps = deque(maxlen=8)   # (lap_number, duration) of clean laps
+        self.stint = deque(maxlen=8)  # durations of clean laps on the current tyres, for the ML model
+        self.compound = None
         self.wears = deque(maxlen=4)  # (lap_number, wear) at the end of recent laps
 
 
@@ -72,7 +74,7 @@ class Race:
             self.sc_active = False
 
 
-def monte_carlo(driver, st, race, lap):
+def monte_carlo(driver, st, race, lap, model=None):
     """Run the strategy simulation after a lap; returns a list of (metric, value, message, extra)."""
     if not race.total or st.age is None or st.wear is None:
         return []
@@ -80,6 +82,8 @@ def monte_carlo(driver, st, race, lap):
     if not fit:
         return []
     pace, slope, se, next_lap = fit
+    if model:  # the trained model knows how a tyre of this age and compound loses time
+        slope = model.slope(st.age + 1, next_lap, race.total, ml.compound_code(st.compound))
     remaining = race.total - next_lap + 1
     if remaining < 3:
         return []
@@ -106,22 +110,6 @@ def fmt_time(seconds):
     return f"{int(m)}:{s:06.3f}"
 
 
-def forecast_lap(laps):
-    """Linear trend over recent laps, ignoring slow outliers (safety car, traffic)."""
-    if len(laps) < 3:
-        return None
-    med = statistics.median(d for _, d in laps)
-    clean = [(n, d) for n, d in laps if d <= med * 1.12]
-    if len(clean) < 3:
-        return None
-    xs, ys = [n for n, _ in clean], [d for _, d in clean]
-    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
-    var = sum((x - mx) ** 2 for x in xs)
-    slope = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / var if var else 0.0
-    next_n = max(xs) + 1
-    return my + slope * (next_n - mx), slope, next_n
-
-
 def tyre_rate(wears):
     """Wear per lap over the recent laps; None if unknown or the tyres were just changed."""
     if len(wears) < 2:
@@ -132,13 +120,23 @@ def tyre_rate(wears):
     return (w1 - w0) / (n1 - n0)
 
 
-def predict(driver, state, lap):
+def predict(driver, state, lap, race=None, model=None):
     """Return a list of (metric, value, message) for one driver after a completed lap."""
     out = []
-    f = forecast_lap(state.laps)
-    if f:
-        t, slope, n = f
-        out.append(("next_lap_time", round(t, 3), f"Lap {n} forecast {fmt_time(t)} ({slope:+.2f} s per lap)."))
+    next_n = lap + 1
+    t = None
+    if model and state.age is not None:
+        recent = ml.clean(list(state.stint))
+        t = model.next_lap(state.age + 1, next_n, race.total if race else None,
+                           ml.compound_code(state.compound), recent)
+    if t is not None:
+        out.append(("next_lap_time", round(t, 3),
+                    f"Lap {next_n} forecast {fmt_time(t)} (ML model, typical error {model.meta['mae']:.1f} s)."))
+    else:
+        f = ml.forecast_lap(state.laps)
+        if f:
+            t, slope, n = f
+            out.append(("next_lap_time", round(t, 3), f"Lap {n} forecast {fmt_time(t)} ({slope:+.2f} s per lap)."))
     rate = tyre_rate(state.wears)
     if rate and state.wear is not None:
         left = max(0.0, (TYRE_LIMIT - state.wear) / rate)
@@ -164,6 +162,12 @@ def main():
     log.info("predicting from telemetry.raw + race.laps -> %s", OUT_TOPIC)
 
     race = Race()
+    model = ml.LapModel.load()
+    if model:
+        log.info("ML lap model loaded: MAE %.2f s on unseen races (linear trend %.2f s), %d laps from %d races",
+                 model.meta["mae"], model.meta["linear_mae"], model.meta["n_train"], len(model.meta["sessions"]))
+    else:
+        log.warning("no trained lap model at %s, using the linear trend (run train.py)", ml.MODEL_PATH)
     try:
         while True:
             m = consumer.poll(1.0)
@@ -195,18 +199,21 @@ def main():
                     st.wears.clear()
                     new_tyres = True
                 st.wears.append((lap, st.wear))
+            st.compound = data.get("compound") or st.compound
             if data.get("is_pit_out") or new_tyres:
                 st.age = 0
+                st.stint.clear()
             elif st.age is None:
                 st.age = round((st.wear or 0) / WEAR_PER_LAP)  # joined mid-stint: guess from wear
             else:
                 st.age += 1
             if dur and not data.get("is_pit_out"):
                 st.laps.append((lap, dur))
+                st.stint.append(dur)
 
             now = datetime.now(timezone.utc).isoformat()
-            results = [(*p, {}) for p in predict(driver, st, lap)]
-            results += monte_carlo(driver, st, race, lap)
+            results = [(*p, {}) for p in predict(driver, st, lap, race, model)]
+            results += monte_carlo(driver, st, race, lap, model)
             for metric, value, message, extra in results:
                 producer.produce(OUT_TOPIC, key=driver, value=json.dumps({
                     "time": now, "driver": driver, "metric": metric, "value": value,
