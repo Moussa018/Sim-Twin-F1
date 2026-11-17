@@ -2,8 +2,8 @@
 
 A consumer group (f1-sink): start several instances and Kafka splits the
 partitions between them. Offsets are committed by hand, only after the batch is
-safely in the database (at-least-once). Invalid messages go to telemetry.dlq
-with the error in a header instead of blocking the stream.
+safely in the database (at-least-once). Invalid messages go to telemetry.
+dlq with the error in a header instead of blocking the stream.
 
 Env: KAFKA_BROKERS, PG_DSN, GROUP_ID (f1-sink), METRICS_PORT (8003)
 """
