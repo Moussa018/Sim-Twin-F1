@@ -25,7 +25,7 @@ For the record, this is what the 3D view looked like when the cars were boxes an
 What you get, all built in the browser with Three.js and zero image files (the textures are drawn on the fly, so there is nothing to download and nothing to lose):
 
 - **Cars** with a nose, front and rear wings, sidepods, halo, helmet and glossy team paint. The wheels spin with the speed, and the rear light and brake discs glow when the driver stamps on the pedal.
-- **Track** with a textured asphalt, kerbs on the inside of corners, tyre walls, a chequered start line, a gantry and floodlights that throw pools of light on the road.
+- **Track** with a textured asphalt,  kerbs on the inside of corners, tyre walls, a chequered start line, a gantry and floodlights that throw pools of light on the road.
 - **Effects**: light trails behind every car (faster means brighter), sparks under heavy braking, and a camera that opens up and rumbles at top speed.
 
 | Key | Action |
